@@ -117,22 +117,25 @@ def get_text_chunks(text, metadata=None):
     chunks = text_splitter.split_text(text)
     return [Document(chunk, metadata) for chunk in chunks]
 
-embeddings = OpenAIEmbeddings()
+def init_embeddings():
+    embeddings = OpenAIEmbeddings()
+    return embeddings
 
 def get_vector_store(text_chunks):
     
-    vector_store = Pinecone.from_existing_index(index_name, embeddings)
+    vector_store = Pinecone.from_existing_index(index_name, init_embeddings())
     vector_store.add_documents(text_chunks)
 
 
-def get_conversational_chain(vector_store,user_question):
+def get_conversational_chain(vector_store,user_question,chat_history):
     # Construct the conversational retrieval chain
     model = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0.5, openai_api_key=os.environ["OPENAI_API_KEY"])
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
     prompt_template = """
     Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
-    provided context just say, "answer is not available in the context", don't provide the wrong answer\n\n
-    Context:\n {context}?\n
+    provided context just say, "I dont have the response in this context, let me get back to you on that", 
+    don't provide the wrong answer\n\n
+    Context:\n {chat_history}?\n
     Question: \n{question}\n
 
     Answer:
@@ -141,35 +144,52 @@ def get_conversational_chain(vector_store,user_question):
                                                   retriever=vector_store.as_retriever(search_kwargs={"k": 2}),
                                                  memory=memory)
 
-    prompt = PromptTemplate(template = prompt_template, input_variables = ["context", "question"])
-    qa_chain = chain.run({'question': user_question})
-    #load_qa_chain(model, chain_type="stuff", prompt=prompt)
+    prompt = PromptTemplate(template = prompt_template, input_variables = ["chat_history", "question"])
+    qa_chain = chain.run(chat_history=chat_history, question=user_question)
+    
     return qa_chain
 
-## Cosine Similarity Retreive Results from VectorDB
-def retrieve_query(user_question, k=2):
-    # vectordb = Pinecone.from_documents(text_chunks, embeddings, index_name=os.environ["PINECONE_ENV_NAME"])
-    vector_store = Pinecone.from_existing_index(index_name, embeddings)
-    retriever = vector_store.as_retriever()
-    # return retriever
-    matching_results=vector_store.similarity_search(user_question,k=k)
-    return matching_results,vector_store
+def process_user_question(user_question,conversation_history):
+    vector_store = Pinecone.from_existing_index(index_name, init_embeddings())
+    # Flatten the conversation history into a single string
+    context = " ".join(conversation_history)
+    print(f"Context for this query: {user_question} is {context}")
+    response = get_conversational_chain(vector_store,user_question,context)
 
-def user_input(user_question):
-    embeddings = OpenAIEmbeddings()
-    
-    #new_db = FAISS.load_local("faiss_index", embeddings)
-    matching_results,vector_store = retrieve_query(user_question)
-
-    response = get_conversational_chain(vector_store,user_question)
-
-    print(response)
+    #print(response)
     st.write("Reply: ", response)
     return response
 
 def text_to_speech(text, filename="temp_audio.mp3"):
-    tts = gTTS(text=text, lang='en-US')
-    tts.save(filename)
+
+     # Instantiates a client
+    client = texttospeech.TextToSpeechClient()
+
+    # Set the text input to be synthesized
+    synthesis_input = texttospeech.SynthesisInput(text=text)
+
+    # Build the voice request, select the language code ("en-US") and the ssml voice gender
+    voice = texttospeech.VoiceSelectionParams(
+        language_code="en-US",
+        ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
+        name="en-US-Wavenet-F"  # This is an example of a WaveNet voice
+    )
+
+    # Select the type of audio file you want
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3
+    )
+
+    # Perform the text-to-speech request on the text input with the selected voice parameters and audio file type
+    response = client.synthesize_speech(
+        input=synthesis_input, voice=voice, audio_config=audio_config
+    )
+
+    # The response's audio_content is binary
+    with open(filename, "wb") as out:
+        out.write(response.audio_content)
+        print(f"Audio content written to file {filename}")
+
     return filename
 
 def convert_audio_to_base64(audio_file_path):
@@ -177,6 +197,9 @@ def convert_audio_to_base64(audio_file_path):
         return base64.b64encode(audio_file.read()).decode('utf-8')
 
 def main():
+    # Call to initialize session state variables
+    initialize_session_state()
+
     # Initialize session state for conversation history
     if 'conversation_history' not in st.session_state:
         st.session_state['conversation_history'] = []
@@ -218,8 +241,8 @@ def main():
 
 
     if user_question:
-        response  = user_input(user_question)            
         st.session_state['conversation_history'].append("You: " + user_question)
+        response = process_user_question(user_question, st.session_state['conversation_history']) 
         st.session_state['conversation_history'].append("AI: " + response)
         
         # Convert response to speech
@@ -227,11 +250,6 @@ def main():
         audio_file_path = os.path.join(os.getcwd(), audio_file)
         audio_base64 = convert_audio_to_base64(audio_file_path)
         
-        # # Display audio player
-        # audio_file_path = os.path.join(os.getcwd(), audio_file)
-        # audio_bytes = open(audio_file_path, "rb").read()
-        # st.audio(audio_bytes, format="audio/mp3", start_time=0, autoplay=True)
-
         # Embed audio in HTML with autoplay
         audio_html = f'<audio autoplay><source src="data:audio/mp3;base64,{audio_base64}" type="audio/mpeg"></audio>'
         st.markdown(audio_html, unsafe_allow_html=True)
