@@ -13,7 +13,7 @@ from langchain.vectorstores import Pinecone
 from langchain.llms import OpenAI
 from langchain.chat_models import ChatOpenAI
 from langchain.chains.question_answering import load_qa_chain
-from langchain.prompts import PromptTemplate
+from langchain.prompts import PromptTemplate, ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from dotenv import load_dotenv
 from pinecone import Pinecone as pc
 from langchain.memory import ConversationBufferMemory
@@ -131,20 +131,36 @@ def get_conversational_chain(vector_store,user_question,chat_history):
     # Construct the conversational retrieval chain
     model = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0.5, openai_api_key=os.environ["OPENAI_API_KEY"])
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-    prompt_template = """
-    Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
-    provided context just say, "I dont have the response in this context, let me get back to you on that", 
-    don't provide the wrong answer\n\n
-    Context:\n {chat_history}?\n
-    Question: \n{question}\n
+    
+    #Define Prompts
+    system_template = r'''
+    Use the following pieces of context to answer the user's question.
+    If you find the answer in the provided context, start your response with "Thank you for your question. 
+    According to my knowledge,.." and then give a brief summary of the response using short sentences.
+    If you don't find the answer in the provided context, just respond "I dont have the response in this context. Can you please try asking again?"
+    If the question is written in gibberish words and cannot be understood, just respond "I am sorry I could not understand. Could you please try asking again?"
+    ---------------
+    Context: ```{context}```
+    '''
 
-    Answer:
-    """
+    user_template = '''
+    Question: ```{question}```
+    '''
+
+    messages= [
+    SystemMessagePromptTemplate.from_template(system_template),
+    HumanMessagePromptTemplate.from_template(user_template)
+    ]
+
+    qa_prompt = ChatPromptTemplate.from_messages(messages)
+    print(f"QA Prompt: {qa_prompt}")
+
     chain = ConversationalRetrievalChain.from_llm(llm=model, chain_type='stuff',
                                                   retriever=vector_store.as_retriever(search_kwargs={"k": 2}),
-                                                 memory=memory)
+                                                 memory=memory,
+                                                 combine_docs_chain_kwargs={'prompt': qa_prompt },)
 
-    prompt = PromptTemplate(template = prompt_template, input_variables = ["chat_history", "question"])
+    # prompt = PromptTemplate(template = prompt_template, input_variables = ["chat_history", "question"])
     qa_chain = chain.run(chat_history=chat_history, question=user_question)
     
     return qa_chain
