@@ -19,10 +19,6 @@ from pinecone import Pinecone as pc
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
-from google.cloud import texttospeech
-from gtts import gTTS
-# Existing imports...
-# ...
 
 load_dotenv()
 os.getenv("OPENAI_API_KEY")
@@ -111,8 +107,9 @@ def process_uploaded_file(uploaded_file):
         return read_docx(uploaded_file)
     else:  # Assuming text or markdown
         return read_md_or_txt(uploaded_file)
+    return text
 
-def get_text_chunks(text, metadata=None):
+def get_text_chunks(text, metadata):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
     chunks = text_splitter.split_text(text)
     return [Document(chunk, metadata) for chunk in chunks]
@@ -129,7 +126,7 @@ def get_vector_store(text_chunks):
 
 def get_conversational_chain(vector_store,user_question,chat_history):
     # Construct the conversational retrieval chain
-    model = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0.5, openai_api_key=os.environ["OPENAI_API_KEY"])
+    model = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0, openai_api_key=os.environ["OPENAI_API_KEY"])
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
     
     #Define Prompts
@@ -176,37 +173,29 @@ def process_user_question(user_question,conversation_history):
     st.write("Reply: ", response)
     return response
 
-def text_to_speech(text, filename="temp_audio.mp3"):
-
-     # Instantiates a client
-    client = texttospeech.TextToSpeechClient()
-
-    # Set the text input to be synthesized
-    synthesis_input = texttospeech.SynthesisInput(text=text)
-
-    # Build the voice request, select the language code ("en-US") and the ssml voice gender
-    voice = texttospeech.VoiceSelectionParams(
-        language_code="en-US",
-        ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
-        name="en-US-Wavenet-F"  # This is an example of a WaveNet voice
-    )
-
-    # Select the type of audio file you want
-    audio_config = texttospeech.AudioConfig(
-        audio_encoding=texttospeech.AudioEncoding.MP3
-    )
-
-    # Perform the text-to-speech request on the text input with the selected voice parameters and audio file type
-    response = client.synthesize_speech(
-        input=synthesis_input, voice=voice, audio_config=audio_config
-    )
-
-    # The response's audio_content is binary
-    with open(filename, "wb") as out:
-        out.write(response.audio_content)
-        print(f"Audio content written to file {filename}")
-
-    return filename
+def openai_text_to_speech(text, filename="speech.mp3"):
+    try:
+        client = OpenAI()
+        response = client.audio.speech.create(
+            model='tts-1',
+            input=text,
+            voice='nova',
+            response_format="mp3"
+        )
+        # If the API returns a direct binary content (audio file)
+        if response.content:
+            with open(filename, "wb") as out:
+                out.write(response.content)
+                print(f"Audio content written to file {filename}")
+        # If the API returns a JSON with a URL to the audio file (not directly supported as per my last update, hypothetical usage)
+        elif 'data' in response and 'url' in response['data']:
+            audio_url = response["data"]["url"]
+            # Here, you'd need to download the audio file from the URL, which depends on the API's actual response structure
+        
+        return filename
+    except Exception as e:
+        print(f"An error occurred during TTS operation: {e}")
+        return None
 
 def convert_audio_to_base64(audio_file_path):
     with open(audio_file_path, "rb") as audio_file:
@@ -244,14 +233,16 @@ def main():
                 all_text = ""
                 # Process uploaded files
                 for uploaded_file in uploaded_files:
+                    metadata = uploaded_file.name
                     all_text += process_uploaded_file(uploaded_file)
+                    
 
                 # Process URL
                 if url:
                     all_text += scrape_webpage(url)
-                
+                    metadata=url
                 #raw_text = get_pdf_text(pdf_docs)
-                text_chunks = get_text_chunks(all_text)
+                text_chunks = get_text_chunks(all_text,metadata)
                 get_vector_store(text_chunks)
                 st.success("Done")
 
@@ -262,7 +253,8 @@ def main():
         st.session_state['conversation_history'].append("AI: " + response)
         
         # Convert response to speech
-        audio_file = text_to_speech(response)
+        #audio_file = text_to_speech(response)
+        audio_file = openai_text_to_speech(response)        
         audio_file_path = os.path.join(os.getcwd(), audio_file)
         audio_base64 = convert_audio_to_base64(audio_file_path)
         
