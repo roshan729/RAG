@@ -11,6 +11,3 @@ python-docx
 pinecone-client
 streamlit_chat
 transformers
-gtts
-google
-google.cloud < 0.34.0
