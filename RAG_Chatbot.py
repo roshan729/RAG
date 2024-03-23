@@ -175,6 +175,7 @@ def process_user_question(user_question,conversation_history):
 
 def openai_text_to_speech(text, filename="speech.mp3"):
     try:
+        print(f"Response passed to openai_text_to_speech: {text}")
         client = OpenAI()
         response = client.audio.speech.create(
             model='tts-1',
