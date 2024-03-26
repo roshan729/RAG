@@ -19,6 +19,9 @@ from pinecone import Pinecone as pc
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
+from openai import OpenAI
+# Existing imports...
+# ...
 
 load_dotenv()
 os.getenv("OPENAI_API_KEY")
@@ -133,7 +136,7 @@ def get_conversational_chain(vector_store,user_question,chat_history):
     system_template = r'''
     Use the following pieces of context to answer the user's question.
     If you find the answer in the provided context, start your response with "Thank you for your question. 
-    According to my knowledge,.." and then give a brief summary of the response using short sentences.
+    As per my understanding,.." and then give a brief summary of the response using short sentences.
     If you don't find the answer in the provided context, just respond "I dont have the response in this context. Can you please try asking again?"
     If the question is written in gibberish words and cannot be understood, just respond "I am sorry I could not understand. Could you please try asking again?"
     ---------------
@@ -185,14 +188,7 @@ def openai_text_to_speech(text, filename="speech.mp3"):
         )
         # If the API returns a direct binary content (audio file)
         if response.content:
-            with open(filename, "wb") as out:
-                out.write(response.content)
-                print(f"Audio content written to file {filename}")
-        # If the API returns a JSON with a URL to the audio file (not directly supported as per my last update, hypothetical usage)
-        elif 'data' in response and 'url' in response['data']:
-            audio_url = response["data"]["url"]
-            # Here, you'd need to download the audio file from the URL, which depends on the API's actual response structure
-        
+            response.stream_to_file(filename)
         return filename
     except Exception as e:
         print(f"An error occurred during TTS operation: {e}")
@@ -257,12 +253,16 @@ def main():
         #audio_file = text_to_speech(response)
         audio_file = openai_text_to_speech(response)        
         audio_file_path = os.path.join(os.getcwd(), audio_file)
+        print(f"Audio file is present in {audio_file_path}")
         audio_base64 = convert_audio_to_base64(audio_file_path)
         
         # Embed audio in HTML with autoplay
-        audio_html = f'<audio autoplay><source src="data:audio/mp3;base64,{audio_base64}" type="audio/mpeg"></audio>'
-        st.markdown(audio_html, unsafe_allow_html=True)
-
+        try:
+            audio_html = f'<audio autoplay><source src="data:audio/mp3;base64,{audio_base64}" type="audio/mpeg"></audio>'
+            st.markdown(audio_html, unsafe_allow_html=True)
+        except Exception as e:
+            print(f"An error occurred during playing the audio operation: {e}")
+            return None
 
 if __name__ == "__main__":
     main()
