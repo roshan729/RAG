@@ -18,9 +18,7 @@ from dotenv import load_dotenv
 from pinecone import Pinecone as pc
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
-from langchain_core.output_parsers import StrOutputParser
-from google.cloud import texttospeech
-from gtts import gTTS
+from openai import OpenAI
 # Existing imports...
 # ...
 
