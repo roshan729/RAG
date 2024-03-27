@@ -19,7 +19,8 @@ from pinecone import Pinecone as pc
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
-from openai import OpenAI
+from google.cloud import texttospeech
+from gtts import gTTS
 # Existing imports...
 # ...
 
@@ -110,9 +111,8 @@ def process_uploaded_file(uploaded_file):
         return read_docx(uploaded_file)
     else:  # Assuming text or markdown
         return read_md_or_txt(uploaded_file)
-    return text
 
-def get_text_chunks(text, metadata):
+def get_text_chunks(text, metadata=None):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
     chunks = text_splitter.split_text(text)
     return [Document(chunk, metadata) for chunk in chunks]
@@ -129,14 +129,14 @@ def get_vector_store(text_chunks):
 
 def get_conversational_chain(vector_store,user_question,chat_history):
     # Construct the conversational retrieval chain
-    model = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0, openai_api_key=os.environ["OPENAI_API_KEY"])
+    model = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0.5, openai_api_key=os.environ["OPENAI_API_KEY"])
     memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
     
     #Define Prompts
     system_template = r'''
     Use the following pieces of context to answer the user's question.
     If you find the answer in the provided context, start your response with "Thank you for your question. 
-    As per my understanding,.." and then give a brief summary of the response using short sentences.
+    According to my knowledge,.." and then give a brief summary of the response using short sentences.
     If you don't find the answer in the provided context, just respond "I dont have the response in this context. Can you please try asking again?"
     If the question is written in gibberish words and cannot be understood, just respond "I am sorry I could not understand. Could you please try asking again?"
     ---------------
@@ -177,6 +177,7 @@ def process_user_question(user_question,conversation_history):
     return response
 
 def openai_text_to_speech(text, filename="speech.mp3"):
+    
     try:
         print(f"Response passed to openai_text_to_speech: {text}")
         client = OpenAI()
@@ -193,7 +194,7 @@ def openai_text_to_speech(text, filename="speech.mp3"):
     except Exception as e:
         print(f"An error occurred during TTS operation: {e}")
         return None
-
+    
 def convert_audio_to_base64(audio_file_path):
     with open(audio_file_path, "rb") as audio_file:
         return base64.b64encode(audio_file.read()).decode('utf-8')
@@ -230,16 +231,14 @@ def main():
                 all_text = ""
                 # Process uploaded files
                 for uploaded_file in uploaded_files:
-                    metadata = uploaded_file.name
                     all_text += process_uploaded_file(uploaded_file)
-                    
 
                 # Process URL
                 if url:
                     all_text += scrape_webpage(url)
-                    metadata=url
+                
                 #raw_text = get_pdf_text(pdf_docs)
-                text_chunks = get_text_chunks(all_text,metadata)
+                text_chunks = get_text_chunks(all_text)
                 get_vector_store(text_chunks)
                 st.success("Done")
 
@@ -250,19 +249,14 @@ def main():
         st.session_state['conversation_history'].append("AI: " + response)
         
         # Convert response to speech
-        #audio_file = text_to_speech(response)
-        audio_file = openai_text_to_speech(response)        
+        audio_file = openai_text_to_speech(response)
         audio_file_path = os.path.join(os.getcwd(), audio_file)
-        print(f"Audio file is present in {audio_file_path}")
         audio_base64 = convert_audio_to_base64(audio_file_path)
         
         # Embed audio in HTML with autoplay
-        try:
-            audio_html = f'<audio autoplay><source src="data:audio/mp3;base64,{audio_base64}" type="audio/mpeg"></audio>'
-            st.markdown(audio_html, unsafe_allow_html=True)
-        except Exception as e:
-            print(f"An error occurred during playing the audio operation: {e}")
-            return None
+        audio_html = f'<audio autoplay><source src="data:audio/mp3;base64,{audio_base64}" type="audio/mpeg"></audio>'
+        st.markdown(audio_html, unsafe_allow_html=True)
+
 
 if __name__ == "__main__":
     main()
