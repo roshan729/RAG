@@ -11,3 +11,4 @@ python-docx
 pinecone-client
 streamlit_chat
 transformers
+langchain-community
